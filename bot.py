@@ -43,24 +43,13 @@ def create_db(update: Update, context: CallbackContext):
     answer = update.message.text
     pattern = r'\b[\w\.]+\b'
     words = re.findall(pattern, answer)
-    values = []  # [activity, 0, activity1, 0 ....]
-    tempForCreat = []  # variable for creat dinamic table and insert values
-    tempForInsert = []
-    create = " CREATE TABLE if not exists {table} ("
-    insert = "INSERT INTO {table} VALUES ("
-    for i in range(len(words)):
-        values.append(words[i])
-        values.append(0)
-        tempForCreat.append('action' + str(i) + ' TEXT, timeAction' + str(i) + ' INTEGER')
-        tempForInsert.append('?')
-    temp1ForCreat = ', '.join(tempForCreat)  # the processing of variable
-    temp1ForInsert = ', '.join(2 * tempForInsert)
-    create += temp1ForCreat + ')'  # finish process
-    insert += temp1ForInsert + ')'
+    create = " CREATE TABLE if not exists {table} (action TEXT, time INTEGER)"
+    insert = "INSERT INTO {table} VALUES (?, ?)"
     with sqlite3.connect(":memory") as con:
         cur = con.cursor()
         cur.execute(create.format(table=user))
-        cur.execute(insert.format(table=user), tuple(values))
+        for i in range(len(words)):
+            cur.execute(insert.format(table=user), (words[i], 0))
         con.commit()
     text = 'Ура, ты создал(а) свою базу данных! Ты положил(а) начало нашего длительного сотрудничества!' \
            ' Будем развиваться вместе! Успехов тебе в твоих занятиях!'
@@ -102,12 +91,8 @@ def button_check_db(update: Update, context: CallbackContext):
                 access = True
         if access:
             for row in cur.execute("SELECT * FROM " + user):
-                for item in row:
-                    i += 1
-                    if i%2 == 1:
-                        text += 'Твоя активность: ' + item + ';'
-                    else:
-                        text += ' Кол-во часов: ' + str(item) + '\n'
+                    text += 'Твоя активность: ' + row[0] + ';'
+                    text += ' Кол-во часов: ' + str(row[1]) + '\n'
             update.message.reply_text(text=text)
         else:
             update.message.reply_text(text='К сожалению база данных еще не создана.')
@@ -115,13 +100,32 @@ def button_check_db(update: Update, context: CallbackContext):
 
 # Update database
 
-
 def button_update_db(update: Update, context: CallbackContext):
-    pass
+    text = 'Ура! Ты зашел(а) добавить информации о прошедшем дне, я очень этому рад!' \
+           ' Пожалуйста, расскажи об этом в таком виде: "Занятие время занятия".' \
+           ' Отправляй по одному сообщению для каждого занятия. Когда закончишь напиши "стоп"'
+    update.message.reply_text(text=text)
+    return UPDATE
 
 
 def update_db(update: Update, context: CallbackContext):
-    pass
+    answer = str(update.message.text)
+    user = 'db' + str(update.message.from_user.id)
+    pattern = r'\b[\w\.]+\b'
+    q = """SELECT * FROM {table} WHERE ACTION = '{active}'"""
+    refresh = "UPDATE {table} set time = {time} WHERE ACTION = '{active}'"
+    if answer.lower() == 'стоп':
+        return ConversationHandler.END
+    else:
+        find = re.findall(pattern, answer)
+        active, hour = find[0], find[1]
+        with sqlite3.connect(':memory') as db:
+            cur = db.cursor()
+            for item in cur.execute(q.format(table=user, active=active)):
+                time = int(item[1]) + int(hour)
+            cur.execute(refresh.format(table=user, active=active, time=time))
+            db.commit()
+        return UPDATE
 
 
 # START MENU
@@ -174,9 +178,11 @@ def main():
 
     # Handlers of conversation
     dispatcher.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(Filters.regex('Создать базу данных'), button_create_db)],
+        entry_points=[MessageHandler(Filters.regex('Создать базу данных'), button_create_db),
+                      MessageHandler(Filters.regex('Добавить результаты'), button_update_db)],
         states={
             CREATE: [MessageHandler(Filters.text, create_db)],
+            UPDATE: [MessageHandler(Filters.text, update_db)]
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     ))
@@ -187,7 +193,6 @@ def main():
 
     # Handlers of textMessage
     dispatcher.add_handler(MessageHandler(filters=Filters.text, callback=message_handler))
-
 
     # Начинаем поиск обновлений
     updater.start_polling(clean=True)
