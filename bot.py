@@ -345,7 +345,8 @@ def reminder(context: CallbackContext):
 # MAIN MENU
 def main():
     print('start')
-    updater = Updater(token='1103722369:AAHEpIChRe2WepU3CNrkWrZGNajSJgF3QJ0',
+    token = input()
+    updater = Updater(token=token,
                       base_url="https://telegg.ru/orig/bot", use_context=True)
     dispatcher = updater.dispatcher
 
