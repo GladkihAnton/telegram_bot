@@ -1,4 +1,6 @@
-# Настройки
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import re
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
@@ -380,9 +382,7 @@ def main():
     # Handlers of textMessage
     dispatcher.add_handler(MessageHandler(filters=Filters.all, callback=message_handler))
 
-    # Начинаем поиск обновлений
     updater.start_polling(clean=True)
-    # Останавливаем бота, если были нажаты Ctrl + C
     print('processing')
     updater.idle()
     print('finish')
