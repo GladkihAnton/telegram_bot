@@ -1,9 +1,7 @@
 # Настройки
 import re
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, CallbackContext, \
-    ConversationHandler, RegexHandler, Job
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton, \
-    ReplyKeyboardRemove
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from datetime import datetime, time, timedelta
 import sqlite3
 import logging
@@ -11,32 +9,34 @@ import logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 
-CREATE, UPDATE = range(2)
+CREATE, UPDATE, ADD, DELETE, DELETEDB = range(5)
 
 
 # CREATING DATABASE
-
-def button_create_db(update: Update, context: CallbackContext):
-    access = True
-    user = 'db' + str(update.message.from_user.id)
+def has_create_db(user):
     with sqlite3.connect(':memory') as db:
         cur = db.cursor()
         all_tables = '''SELECT name FROM sqlite_master WHERE type="table"'''
         for row in cur.execute(all_tables):
             if user in row:
-                access = False
-        if access:
-            text = 'Отлично, вы хотите создать новую базу данных!' \
-                   ' Теперь вам нужно ввести до 10 своих активностей за которыми ' \
-                   'я буду следить, а вы должны будете заполнять их по вечерам.\n' \
-                   'П.С. Слова разделенные пробелом будут считаться за различные занятия, поэтому постарайтесь ввести' \
-                   ' занятие в одно слово, например, вместо "Английский язык" напиши "Английский."'
-            update.message.reply_text(text=text)
-            return CREATE
-        else:
-            update.message.reply_text(text='Подождите, вы же уже создали базу данных,'
-                                           ' удалите ее если хотите начать сначала.')
-            return ConversationHandler.END
+                return True
+        return False
+
+
+def command_create_db(update: Update, context: CallbackContext):
+    user = 'db' + str(update.message.from_user.id)
+    if not has_create_db(user):
+        text = 'Отлично, вы хотите создать новую базу данных!' \
+               ' Теперь вам нужно ввести до 10 своих активностей за которыми ' \
+               'я буду следить, а вы должны будете заполнять их по вечерам.\n' \
+               'П.С. Слова разделенные пробелом будут считаться за различные занятия, поэтому постарайтесь ввести' \
+               ' занятие в одно слово, например, вместо "Английский язык" напиши "Английский."'
+        update.message.reply_text(text=text)
+        return CREATE
+    else:
+        update.message.reply_text(text='Подождите, вы же уже создали базу данных,'
+                                       ' удалите ее если хотите начать сначала.')
+        return ConversationHandler.END
 
 
 def create_db(update: Update, context: CallbackContext):
@@ -44,60 +44,58 @@ def create_db(update: Update, context: CallbackContext):
     answer = update.message.text
     pattern = r'\b[\w\.]+\b'
     words = re.findall(pattern, answer)
-    create = " CREATE TABLE if not exists {table} (action TEXT, timeWeek INTEGER, timeMonth INTEGER, allTime INTEGER)"
-    insert = "INSERT INTO {table} VALUES (?, ?, ?, ?)"
+    create = " CREATE TABLE if not exists {table}" \
+             " (action TEXT, time_week INTEGER, time_month INTEGER, all_time INTEGER, last_update INTEGER)"
+    insert = "INSERT INTO {table} VALUES (?, ?, ?, ?, ?)"
     with sqlite3.connect(":memory") as con:
         cur = con.cursor()
         cur.execute(create.format(table=user))
         for i in range(len(words)):
-            cur.execute(insert.format(table=user), (words[i], 0, 0, 0))
+            cur.execute(insert.format(table=user), (words[i], 0, 0, 0, 0))
         con.commit()
     text = 'Ура, вы создали свою базу данных! Вы положили начало нашего длительного сотрудничества!' \
            ' Будем развиваться вместе! Успехов вам в ваших занятиях!'
     update.message.reply_text(text=text)
+
+    # Create job which will remember user for updating
+    every_day_jobs = context.job_queue.run_repeating(callback=refresher, interval=timedelta(hours=24),
+                                                     first=time(hour=1),
+                                                     context=update.message.chat_id)
+    new_job = context.job_queue.run_repeating(callback=reminder, interval=timedelta(minutes=30),
+                                              first=time(hour=18),
+                                              context=update.message.chat_id)
+    context.chat_data[user + 'repeat'] = new_job
+    context.chat_data[user + 'refresh'] = every_day_jobs
     return ConversationHandler.END
 
 
 # DELETING DATABASE
 
-def button_delete_db(update: Update, context: CallbackContext):
+def command_delete_db(update: Update, context: CallbackContext):
     user = 'db' + str(update.message.from_user.id)
-    access = False
-    with sqlite3.connect(':memory') as db:
-        cur = db.cursor()
-        all_tables = '''SELECT name FROM sqlite_master WHERE type="table"'''
-        for row in cur.execute(all_tables):
-            if user in row:
-                access = True
-        if access:
+    with sqlite3.connect(":memory") as db:
+            cur = db.cursor()
             cur.execute('''DROP TABLE {table}'''.format(table=user))
+            db.commit()
             update.message.reply_text(text='Вы удалили свою базу данных.')
-        else:
-            update.message.reply_text(text='Создайте базу данных, чтобы ее удалить.')
-        db.commit()
 
 
 # CHECK DATABASE
 def check_db(update: Update, context: CallbackContext, week):
     user = 'db' + str(update.message.from_user.id)
-    access = False
-    with sqlite3.connect(':memory') as db:
-        cur = db.cursor()
+    if has_create_db(user):
         text = ''
-        all_tables = '''SELECT name FROM sqlite_master WHERE type="table"'''
-        for row in cur.execute(all_tables):
-            if user in row:
-                access = True
-        if access:
+        with sqlite3.connect(":memory") as db:
+            cur = db.cursor()
             for row in cur.execute("SELECT * FROM " + user):
                 text += 'Ваша активность: ' + row[0] + ';'
                 if week:
                     text += ' Кол-во часов за неделю: ' + str(row[1]) + '\n'
                 else:
                     text += ' Кол-во часов за месяц: ' + str(row[2]) + '\n'
-            update.message.reply_text(text=text)
-        else:
-            update.message.reply_text(text='К сожалению база данных еще не создана.')
+        update.message.reply_text(text=text)
+    else:
+        update.message.reply_text(text='К сожалению база данных еще не создана.')
 
 
 def button_check_week_db(update: Update, context: CallbackContext):
@@ -110,35 +108,37 @@ def button_check_month_db(update: Update, context: CallbackContext):
 
 # Update database
 
-def button_update_db(update: Update, context: CallbackContext):
+def command_update_db(update: Update, context: CallbackContext):
     user = 'db' + str(update.message.from_user.id)
-    access = False
-    with sqlite3.connect(':memory') as db:
-        cur = db.cursor()
-        all_tables = '''SELECT name FROM sqlite_master WHERE type="table"'''
-        for row in cur.execute(all_tables):
-            if user in row:
-                access = True
-        if access:
-            text = 'Ура! Вы зашели добавить информации о прошедшем дне, я очень этому рад!' \
-                   ' Пожалуйста, расскажите об этом в таком виде: "Занятие время занятия".' \
-                   ' Отправляйте по одному сообщению для каждого занятия. Когда закончите напишите "стоп"'
-            update.message.reply_text(text=text)
-            return UPDATE
-        else:
-            text = 'База данных еще не создана.'
-            update.message.reply_text(text=text)
-            return ConversationHandler.END
+    if has_create_db(user):
+        text = 'Ура! Вы зашели добавить информации о прошедшем дне, я очень этому рад!' \
+               ' Пожалуйста, расскажите об этом в таком виде: "Занятие время занятия".' \
+               ' Отправляйте по одному сообщению для каждого занятия. Когда закончите напишите "стоп"'
+        update.message.reply_text(text=text)
+        return UPDATE
+    else:
+        text = 'База данных еще не создана.'
+        update.message.reply_text(text=text)
+        return ConversationHandler.END
 
 
 def update_db(update: Update, context: CallbackContext):
     answer = str(update.message.text)
     user = 'db' + str(update.message.from_user.id)
     pattern = r'\b[\w\.]+\b'
-    select = """SELECT * FROM {table} WHERE ACTION = '{active}'"""
-    refresh = "UPDATE {table} set timeWeek = {time_week}, timeMonth = {time_month}, allTime={all_time}" \
-              "  WHERE ACTION = '{active}'"
-    if answer.lower() == 'стоп':
+    select = """SELECT * FROM {table} WHERE lower(ACTION) = '{active}'"""
+    refresh = "UPDATE {table} set time_week = {time_week}, time_month = {time_month}," \
+              " all_time={all_time}, last_update={last_update}" \
+              "  WHERE lower(ACTION) = '{active}'"
+    if answer.lower() == 'стоп' or answer.lower() == '/stop':
+        context.chat_data[user + 'repeat'].schedule_removal()
+        hours = datetime.now().time().hour
+        first = datetime.now() + timedelta(days=1, hours=18) - timedelta(hours=hours)
+        new_job = context.job_queue.run_repeating(callback=reminder, interval=timedelta(seconds=25),
+                                                  first=first,
+                                                  context=update.message.chat_id)
+        context.chat_data[user + 'repeat'] = new_job
+        update.message.reply_text(text='Спасибо!')
         return ConversationHandler.END
     else:
         try:
@@ -146,20 +146,26 @@ def update_db(update: Update, context: CallbackContext):
             active, hour = find[0], find[1]
             with sqlite3.connect(':memory') as db:
                 cur = db.cursor()
-                for item in cur.execute(select.format(table=user, active=active)):
-                    time_week= int(item[1]) + int(hour)
+                for item in cur.execute(select.format(table=user, active=str(active).lower())):
+                    time_week = int(item[1]) + int(hour)
                     time_month = int(item[2]) + int(hour)
                     all_time = int(item[3]) + int(hour)
-                cur.execute(refresh.format(table=user, active=active, time_week=time_week,
-                                           time_month=time_month, all_time=all_time))
+                    last_update = int(hour)
+                cur.execute(refresh.format(table=user, active=str(active).lower(), time_week=time_week,
+                                           time_month=time_month, all_time=all_time, last_update=last_update))
                 db.commit()
+            update.message.reply_text(text='/stop')
             return UPDATE
         except IndexError:
             update.message.reply_text(text='Вы ввели не в верном формате. Правильный формат: '
                                            'Английский 10, например.')
+            return UPDATE
+
         except ValueError:
             update.message.reply_text(text='Вы ввели не в верном формате. Правильный формат: '
                                            'Английский 10, например. П.С. ошибка в часах')
+            return UPDATE
+
         except UnboundLocalError:
             with sqlite3.connect(':memory') as db:
                 db.cursor()
@@ -172,6 +178,7 @@ def update_db(update: Update, context: CallbackContext):
                     comma = True
                 text += '.'
             update.message.reply_text(text=text)
+            return UPDATE
 
 
 # START MENU
@@ -188,42 +195,151 @@ def start_command(update: Update, context: CallbackContext):
            'Так же буду напоминать вам, чтобы вы не забывали докладывать о своих результатах за день.' \
            'Чтобы начать создай базу данных /create.  Для подробной информации напиши /help'
     update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
-    # context.job_queue.run_repeating(callback=reminder, interval=timedelta(seconds=5),
-    #                                 first=datetime.now()-timedelta(hours=3),
-    #                                 context=update.message.chat_id)
 
 
 # HELP
 
 def help_command(update: Update, context: CallbackContext):
     bot = context.bot
-    bot.send_message(chat_id=update.message.chat_id, text="В разработке")
+    text = 'досутпные команды: \n' \
+           '/deleteDB - удалить базу данных \n' \
+           '/create - создать новую базу данных \n' \
+           '/cancel - отмена предыдущего добавления \n' \
+           '/add - добавить новые занятия \n' \
+           '/delete - удалить занятия'
+
+    bot.send_message(chat_id=update.message.chat_id, text=text)
 
 
 # TEXT HANDLER
 
 def message_handler(update: Update, context: CallbackContext):
-    text = update.message.text
-    context.job_queue.stop()
-    print(text)
-    print()
-    if (datetime.now() - timedelta(hours=3)).isoweekday() == 1:
-        print('yes')
+    update.message.reply_text(text='Бот не умеет отвечать на сообщения. Для просмотра комманд введите /help')
 
 
 # END OF CONVERSATION
-def yes_or_no(update: Update, context: CallbackContext):
-    pass
 
 
 def cancel(update: Update, context: CallbackContext):
+    if has_create_db('db' + str(update.message.from_user.id)):
+        with sqlite3.connect(':memory') as db:
+            cur = db.cursor()
+            user = 'db' + str(update.message.from_user.id)
+            select = """SELECT * FROM {table}"""
+            refresh = "UPDATE {table} set time_week = {time_week}, time_month = {time_month}," \
+                      " all_time={all_time}, last_update={last_update}" \
+                      "  WHERE lower(ACTION) = '{active}'"
+            upd = {}
+            for item in cur.execute(select.format(table=user)):
+                print(item)
+                upd[str(item[0])] = []
+                last_update = int(item[4])
+                upd[str(item[0])].append(int(item[1]) - last_update)  # [0] = time_week
+                upd[str(item[0])].append(int(item[2]) - last_update)  # [1] = time_month
+                upd[str(item[0])].append(int(item[3]) - last_update)  # [2] = all_time
+                upd[str(item[0])].append(0)  # [4] last_update
+            for active in upd.keys():
+                cur.execute(refresh.format(table=user, active=str(active).lower(), time_week=upd[active][0],
+                                           time_month=upd[active][1], all_time=upd[active][2], last_update=0))
+            db.commit()
+
+        update.message.reply_text(text='Вы удалили последнее обновление!')
+    else:
+        update.message.reply_text(text='База данных не создана.')
+
+
+def command_add(update: Update, context: CallbackContext):
+    user = 'db' + str(update.message.from_user.id)
+    if has_create_db(user):
+        return ADD
+    else:
+        update.message.reply_text(text='База данных не создана')
+
+
+def add_to_db(update: Update, context: CallbackContext):
+    answer = update.message.text
+    user = 'db' + str(update.message.from_user.id)
+    pattern = r'\b[\w\.]+\b'
+    words = re.findall(pattern, answer)
+    with sqlite3.connect(':memory') as db:
+        cur = db.cursor()
+        insert = "INSERT INTO {table} VALUES (?, ?, ?, ?, ?)"
+        if len(words) == 1:
+            text = 'Вы добавили новое занятие: '
+        else:
+            text = 'Вы добавили новые занятия: '
+        for i in range(len(words)):
+            cur.execute(insert.format(table=user), (words[i], 0, 0, 0, 0))
+            text += words[i] + '; '
+        db.commit()
+        update.message.reply_text(text=text)
     return ConversationHandler.END
 
 
+def command_delete(update: Update, context: CallbackContext):
+    user = 'db' + str(update.message.from_user.id)
+    if has_create_db(user):
+        update.message.reply_text(text='Перечислите занятия, которые хотите удалить.')
+        return DELETE
+    else:
+        update.message.reply_text(text='База данных не создана.')
+
+def delete_from_db(update: Update, context: CallbackContext):
+    answer = update.message.text
+    user = 'db' + str(update.message.from_user.id)
+    pattern = r'\b[\w\.]+\b'
+    words = re.findall(pattern, answer)
+    with sqlite3.connect(':memory') as db:
+        cur = db.cursor()
+        delete = "DELETE FROM {table} WHERE lower(ACTION) = '{active}'"
+        for i in range(len(words)):
+            cur.execute(delete.format(table=user, active=str(words[i]).lower()))
+        db.commit()
+    return ConversationHandler.END
+
+
+def question(update: Update, context: CallbackContext):
+    user = 'db' + str(update.message.from_user.id)
+    if has_create_db(user):
+        update.message.reply_text(text='Вы уверены? /yes или /no')
+        return DELETEDB
+    else:
+        update.message.reply_text(text='Создайте базу данных, чтобы ее удалить.')
+        return ConversationHandler.END
+
+
+def yes_or_no(update: Update, context: CallbackContext):
+    answer = update.message.text
+    if str(answer).lower() == '/yes':
+        command_delete_db(update, context)
+        return ConversationHandler.END
+    else:
+        return ConversationHandler.END
+
+def stop(update: Update, context: CallbackContext):
+    return ConversationHandler.END
+
+
+def refresher(context: CallbackContext):
+    if datetime.now().day == 1:
+        with sqlite3.connect(':memory') as db:
+            cur = db.cursor()
+            user = 'db' + str(context.job.context)
+            refresh = "UPDATE {table} set time_month = 0"
+            cur.execute(refresh.format(table=user))
+            db.commit()
+    if datetime.now().isoweekday() == 1:
+        with sqlite3.connect(':memory') as db:
+            cur = db.cursor()
+            user = 'db' + str(context.job.context)
+            refresh = "UPDATE {table} set time_week = 0"
+            cur.execute(refresh.format(table=user))
+            db.commit()
+
+
 def reminder(context: CallbackContext):
-    context.bot.send_message(chat_id=context.job.context, text='ypa')
-    print('ypa')
-    print(datetime.now())
+    text = 'Пришло время заполнить результаты, пожалуйста, сделайте это.'
+    context.bot.send_message(chat_id=context.job.context, text=text)
 
 
 # MAIN MENU
@@ -236,25 +352,32 @@ def main():
     # Handlers of command
     dispatcher.add_handler(CommandHandler('start', start_command))
     dispatcher.add_handler(CommandHandler('help', help_command))
+    dispatcher.add_handler(CommandHandler('cancel', cancel))
 
     # Handlers of conversation
     dispatcher.add_handler(ConversationHandler(
-        entry_points=[CommandHandler('create', button_create_db),
-                      MessageHandler(Filters.regex('Добавить результаты'), button_update_db)],
+        entry_points=[CommandHandler('create', command_create_db),
+                      CommandHandler('add', command_add),
+                      CommandHandler('delete', command_delete),
+                      CommandHandler('deleteDB', question),
+                      MessageHandler(Filters.regex('Добавить результаты'), command_update_db)],
         states={
             CREATE: [MessageHandler(Filters.text, create_db)],
-            UPDATE: [MessageHandler(Filters.text, update_db)]
+            UPDATE: [MessageHandler(Filters.text, update_db)],
+            ADD: [MessageHandler(Filters.text, add_to_db)],
+            DELETE: [MessageHandler(Filters.text, delete_from_db)],
+            DELETEDB: [MessageHandler(Filters.text, yes_or_no)]
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[CommandHandler('stop', stop)]
     ))
 
     # Handlers of regex
+    # dispatcher.add_handler(MessageHandler(Filters.regex(''), button_check_week_db))
     dispatcher.add_handler(MessageHandler(Filters.regex('Недельные результаты'), button_check_week_db))
     dispatcher.add_handler(MessageHandler(Filters.regex('Результаты за месяц'), button_check_month_db))
-    dispatcher.add_handler(CommandHandler('delete', button_delete_db))
 
     # Handlers of textMessage
-    dispatcher.add_handler(MessageHandler(filters=Filters.text, callback=message_handler))
+    dispatcher.add_handler(MessageHandler(filters=Filters.all, callback=message_handler))
 
     # Начинаем поиск обновлений
     updater.start_polling(clean=True)
