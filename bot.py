@@ -76,10 +76,10 @@ def create_db(update: Update, context: CallbackContext):
 def command_delete_db(update: Update, context: CallbackContext):
     user = 'db' + str(update.message.from_user.id)
     with sqlite3.connect(":memory") as db:
-            cur = db.cursor()
-            cur.execute('''DROP TABLE {table}'''.format(table=user))
-            db.commit()
-            update.message.reply_text(text='Вы удалили свою базу данных.')
+        cur = db.cursor()
+        cur.execute('''DROP TABLE {table}'''.format(table=user))
+        db.commit()
+        update.message.reply_text(text='Вы удалили свою базу данных.')
 
 
 # CHECK DATABASE
@@ -126,25 +126,30 @@ def command_update_db(update: Update, context: CallbackContext):
 
 def update_db(update: Update, context: CallbackContext):
     answer = str(update.message.text)
+
     user = 'db' + str(update.message.from_user.id)
     pattern = r'\b[\w\.]+\b'
+    find = re.findall(pattern, answer)
+    print(find)
     select = """SELECT * FROM {table} WHERE lower(ACTION) = '{active}'"""
     refresh = "UPDATE {table} set time_week = {time_week}, time_month = {time_month}," \
               " all_time={all_time}, last_update={last_update}" \
               "  WHERE lower(ACTION) = '{active}'"
+    # refresh = "UPDATE {table} set time_week = 2 WHERE lower(ACTION) = '{active}'"
     if answer.lower() == 'стоп' or answer.lower() == '/stop':
-        context.chat_data[user + 'repeat'].schedule_removal()
-        hours = datetime.now().time().hour
-        first = datetime.now() + timedelta(days=1, hours=18) - timedelta(hours=hours)
-        new_job = context.job_queue.run_repeating(callback=reminder, interval=timedelta(seconds=25),
-                                                  first=first,
-                                                  context=update.message.chat_id)
-        context.chat_data[user + 'repeat'] = new_job
+        # context.chat_data[user + 'repeat'].schedule_removal()
+        # hours = datetime.now().time().hour
+        # first = datetime.now() + timedelta(days=1, hours=18) - timedelta(hours=hours)
+        # new_job = context.job_queue.run_repeating(callback=reminder, interval=timedelta(seconds=25),
+        #                                           first=first,
+        #                                           context=update.message.chat_id)
+        # context.chat_data[user + 'repeat'] = new_job
         update.message.reply_text(text='Спасибо!')
         return ConversationHandler.END
     else:
         try:
             find = re.findall(pattern, answer)
+            print(find)
             active, hour = find[0], find[1]
             with sqlite3.connect(':memory') as db:
                 cur = db.cursor()
@@ -153,9 +158,11 @@ def update_db(update: Update, context: CallbackContext):
                     time_month = int(item[2]) + int(hour)
                     all_time = int(item[3]) + int(hour)
                     last_update = int(hour)
+                    print(time_week, time_month, all_time, last_update)
                 cur.execute(refresh.format(table=user, active=str(active).lower(), time_week=time_week,
                                            time_month=time_month, all_time=all_time, last_update=last_update))
-                db.commit()
+                # cur.execute(refresh.format(table=user, active=str(active).lower()))
+                # db.commit()
             update.message.reply_text(text='/stop')
             return UPDATE
         except IndexError:
@@ -184,7 +191,12 @@ def update_db(update: Update, context: CallbackContext):
 
 
 # START MENU
-
+def check(update: Update, context: CallbackContext):
+    user = 'db' + str(update.message.from_user.id)
+    with sqlite3.connect(":memory") as db:
+        cur = db.cursor()
+        for row in cur.execute("SELECT * FROM " + user):
+            print(row)
 def start_command(update: Update, context: CallbackContext):
     keyboard = [
         [
@@ -217,6 +229,20 @@ def help_command(update: Update, context: CallbackContext):
 
 def message_handler(update: Update, context: CallbackContext):
     update.message.reply_text(text='Бот не умеет отвечать на сообщения. Для просмотра комманд введите /help')
+    user = 'db' + str(update.message.from_user.id)
+    if has_create_db(user):
+        text = ''
+        with sqlite3.connect(":memory") as db:
+            cur = db.cursor()
+            for row in cur.execute("SELECT * FROM " + user + " where lower(action) = '{a}'".format(a=str(update.message.text).lower())):
+                print(row)
+                print(type(row[1]))
+                print(type(row[2]))
+                print(type(row[3]))
+                print(type(row[4]))
+                if row[0] == str(update.message.text):
+                    print('yes')
+    print(update.message.text)
 
 
 # END OF CONVERSATION
@@ -286,6 +312,7 @@ def command_delete(update: Update, context: CallbackContext):
     else:
         update.message.reply_text(text='База данных не создана.')
 
+
 def delete_from_db(update: Update, context: CallbackContext):
     answer = update.message.text
     user = 'db' + str(update.message.from_user.id)
@@ -318,6 +345,7 @@ def yes_or_no(update: Update, context: CallbackContext):
     else:
         return ConversationHandler.END
 
+
 def stop(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
@@ -349,7 +377,7 @@ def main():
     print('start')
     token = input()
     updater = Updater(token=token
-                        , use_context=True)
+                      , base_url="https://telegg.ru/orig/bot", use_context=True)
     dispatcher = updater.dispatcher
 
     # Handlers of command
@@ -378,6 +406,7 @@ def main():
     # dispatcher.add_handler(MessageHandler(Filters.regex(''), button_check_week_db))
     dispatcher.add_handler(MessageHandler(Filters.regex('Недельные результаты'), button_check_week_db))
     dispatcher.add_handler(MessageHandler(Filters.regex('Результаты за месяц'), button_check_month_db))
+    # dispatcher.add_handler(MessageHandler(Filters.regex('check'), check))
 
     # Handlers of textMessage
     dispatcher.add_handler(MessageHandler(filters=Filters.all, callback=message_handler))
