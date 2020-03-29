@@ -348,8 +348,7 @@ def reminder(context: CallbackContext):
 def main():
     print('start')
     token = input()
-    updater = Updater(token=token,
-                      base_url="https://telegg.ru/orig/bot", use_context=True)
+    updater = Updater(token=token, use_context=True)
     dispatcher = updater.dispatcher
 
     # Handlers of command
@@ -375,7 +374,6 @@ def main():
     ))
 
     # Handlers of regex
-    # dispatcher.add_handler(MessageHandler(Filters.regex(''), button_check_week_db))
     dispatcher.add_handler(MessageHandler(Filters.regex('Недельные результаты'), button_check_week_db))
     dispatcher.add_handler(MessageHandler(Filters.regex('Результаты за месяц'), button_check_month_db))
 
