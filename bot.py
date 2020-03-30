@@ -265,6 +265,8 @@ def yes_or_no(update: Update, context: CallbackContext):
 def command_delete_db(update: Update, context: CallbackContext):
     """Delete user's table"""
     user = 'db' + str(update.message.from_user.id)
+    context.chat_data[user + 'repeat'].schedule_removal()
+    context.chat_data[user + 'refresh'].schedule_removal()
     with sqlite3.connect("users_database") as db:
             cur = db.cursor()
             cur.execute('''DROP TABLE {table}'''.format(table=user))
