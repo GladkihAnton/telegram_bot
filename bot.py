@@ -397,8 +397,7 @@ def message_handler(update: Update, context: CallbackContext):
 def main():
     print('start')
     token = input()
-    updater = Updater(token=token,
-                      base_url="https://telegg.ru/orig/bot", use_context=True)
+    updater = Updater(token=token, use_context=True)
     dispatcher = updater.dispatcher
 
     # Handlers of command
