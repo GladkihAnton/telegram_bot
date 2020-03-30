@@ -404,7 +404,7 @@ def main():
     dispatcher.add_handler(CommandHandler('start', start_command))
     dispatcher.add_handler(CommandHandler('help', help_command))
     dispatcher.add_handler(CommandHandler('cancel', cancel))
-    dispatcher.add_handler(CommandHandler('all', all))
+    dispatcher.add_handler(CommandHandler('all', check_all_db))
 
     # Handlers of conversation
     dispatcher.add_handler(ConversationHandler(
